@@ -1,12 +1,11 @@
 # Entorno
 ENVIRONMENT=development
-DEBUG=true or false
 PORT=8080
 
 # Base de datos
-DATABASE_URL=database bd
-DATABASE_LOG_MODE=true or false
+DB_PATH=/app/data/app.db
 
-# WhatsApp
-WHATSAPP_PROVIDER=whatsmeow
-SESSION_TIMEOUT=300
+# Salt
+JWT_SECRETO=tu_clave_secreta_larga_1
+COOKIE_SECRET=tu_clave_secreta_larga_2
+JWT_TIEMPO_EXPIRA=3600

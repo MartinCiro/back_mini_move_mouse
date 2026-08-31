@@ -22,6 +22,9 @@ type Config struct {
 	Database   string
 	PortDB     string
 
+	// Base de datos
+	DBPath string
+
 	// Auth
 	JWTSecret        string
 	JWTSalt          string
@@ -66,11 +69,7 @@ func Load() *Config {
 		Env:  getEnv("ENV", "Production"),
 
 		// Database
-		UserDB:     getEnv("USER_DB", ""),
-		PasswordDB: getEnv("PASS_DB", ""),
-		ServerDB:   getEnv("HOST_DB", ""),
-		Database:   getEnv("NAME_DB", ""),
-		PortDB:     getEnv("PORT_DB", "5432"),
+		DBPath: getEnv("DB_PATH", "app.db"),
 
 		// Auth
 		JWTSecret:     getEnv("JWT_SECRETO", ""),

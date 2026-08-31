@@ -22,10 +22,6 @@ type UsuariosPort interface {
 
 	// ObtenerUsuarioPorUsername obtiene un usuario por su nombre de usuario
 	ObtenerUsuarioPorUsername(ctx context.Context, username string) (*Usuario, error)
-
-	// ObtenerUsuarioPorEmail obtiene un usuario por su email
-	ObtenerUsuarioPorEmail(ctx context.Context, email string) (*Usuario, error)
-
 	// ObtenerUsuarioConRelaciones obtiene un usuario con información de rol y estado
 	ObtenerUsuarioConRelaciones(ctx context.Context, usuarioData UsuarioDataXid) (*UsuarioConRelaciones, error)
 

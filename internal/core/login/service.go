@@ -1,16 +1,12 @@
-// internal/core/login/service.go
 package login
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"api_go/config"
 	"api_go/internal/core/auth"
 	"api_go/internal/infrastructure/jwt"
-	"api_go/internal/infrastructure/redis"
 	"api_go/pkg/logger"
 	"api_go/pkg/utils"
 )
@@ -18,7 +14,6 @@ import (
 type LoginService struct {
 	authPort        auth.AuthPort
 	jwtService      *jwt.JWTService
-	redisService    *redis.Cache
 	passwordService *utils.PasswordService
 	config          *config.Config
 }
@@ -26,7 +21,6 @@ type LoginService struct {
 func NewLoginService(
 	authPort auth.AuthPort,
 	jwtService *jwt.JWTService,
-	redisService *redis.Cache,
 	passwordService *utils.PasswordService,
 	config *config.Config,
 ) *LoginService {
@@ -34,7 +28,6 @@ func NewLoginService(
 		config:          config,
 		authPort:        authPort,
 		jwtService:      jwtService,
-		redisService:    redisService,
 		passwordService: passwordService,
 	}
 }
@@ -52,28 +45,25 @@ type LoginResult struct {
 
 // Execute retorna objetos del dominio, NO estructuras HTTP
 func (s *LoginService) Execute(ctx context.Context, credentials LoginCredentials) (*LoginResult, error) {
-
 	// 1. Validar credenciales con AuthPort
 	user, err := s.authPort.RetrieveUser(ctx, auth.AuthData{
 		Username: credentials.Email,
 	})
 
 	if err != nil {
-		fmt.Printf("❌ Error en RetrieveUser: %v\n", err)
+		logger.Error("❌ Error en RetrieveUser", "email", credentials.Email, "error", err)
 		return nil, fmt.Errorf("credenciales inválidas")
 	}
 
 	if user == nil {
-		fmt.Printf("❌ Usuario no encontrado: %s\n", credentials.Email)
+		logger.Warn("❌ Usuario no encontrado", "email", credentials.Email)
 		return nil, fmt.Errorf("credenciales inválidas")
 	}
 
 	// 2. Verificar contraseña
-	logger.Info("Antes de compare", credentials.Password)
 	passwordMatch := s.passwordService.ComparePasswords(credentials.Password, user.PasswordHash)
-
 	if !passwordMatch {
-		fmt.Printf("❌ Contraseña incorrecta para: %s\n", credentials.Email)
+		logger.Warn("❌ Contraseña incorrecta", "email", credentials.Email)
 		return nil, fmt.Errorf("credenciales inválidas")
 	}
 
@@ -84,20 +74,12 @@ func (s *LoginService) Execute(ctx context.Context, credentials LoginCredentials
 		IDRol:    *user.IDRol,
 	})
 	if err != nil {
+		logger.Error("❌ Error generando token JWT", "error", err)
 		return nil, fmt.Errorf("error generando token: %v", err)
 	}
 
-	// 4. Guardar en cache
-	userCacheKey := fmt.Sprintf("user:%d", user.ID)
-	userData := map[string]interface{}{
-		"id_user":  user.ID,
-		"nombre":   user.Username,
-		"id_rol":   user.IDRol,
-		"permisos": user.Permisos,
-	}
-
-	userDataJSON, _ := json.Marshal(userData)
-	s.redisService.Set(ctx, userCacheKey, string(userDataJSON), 24*time.Hour)
+	// ✅ ELIMINADO: Paso 4 (Guardar en caché de Redis).
+	// La autenticación ahora es 100% stateless basada en la cookie firmada y el JWT.
 
 	// 5. Construir resultado del dominio
 	return &LoginResult{

@@ -46,3 +46,8 @@ var (
 var (
 	PermissionAdmin = []string{"admin", "administrador"}
 )
+
+// Permisos para Descargas
+var (
+	PermissionDescargasEjecutar = []string{"dwd:exec", "descarga:ejecutar"}
+)

@@ -52,7 +52,7 @@ func (am *AuthMiddleware) Handler(next http.Handler) http.Handler {
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				} else {
-					cookies.ClearAuthCookie(w)
+					am.cookieSigner.ClearAuthCookie(w)
 				}
 			}
 		}
@@ -74,7 +74,7 @@ func (am *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 					ctx = context.WithValue(ctx, "user", user)
 					ctx = context.WithValue(ctx, "userID", user.ID)
 				} else {
-					cookies.ClearAuthCookie(w)
+					am.cookieSigner.ClearAuthCookie(w)
 				}
 			}
 		}
@@ -83,10 +83,13 @@ func (am *AuthMiddleware) OptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-func (am *AuthMiddleware) RequireAuthAndPermission(permsMiddleware *PermissionsMiddleware, requiredPermissions []string) func(http.Handler) http.Handler {
+// RequireAuthAndPermission encadena la validación de Auth y luego la de Permisos
+func (am *AuthMiddleware) RequireAuthAndPermission(requiredPermissions []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
+		// Primero valida Auth (para poner el "user" en el contexto),
+		// luego valida Permisos (que lee ese "user" del contexto)
 		return am.Handler(
-			permsMiddleware.Handler(requiredPermissions)(next),
+			RequirePermissions(requiredPermissions)(next),
 		)
 	}
 }

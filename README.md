@@ -1,476 +1,236 @@
-## 📁 **ESTRUCTURA COMPLETA DEL PROYECTO**
+# 🚀 Go API - Arquitectura Hexagonal (Zero-Dependency)
 
-``` bash
-template-nest/
-├── 📄 Dockerfile
-├── 📄 Makefile
-├── 📄 README.md
+API RESTful construida en Go siguiendo los principios de la **Arquitectura Hexagonal (Puertos y Adaptadores)**. 
+
+Diseñada para ser **100% portable y autocontenida**: no requiere Docker, Kubernetes, PostgreSQL ni Redis. Funciona nativamente con **SQLite** y autenticación **stateless** basada en cookies firmadas.
+
+---
+
+## 📁 **ESTRUCTURA DEL PROYECTO**
+
+```bash
+go-api/
 ├── 📄 go.mod
 ├── 📄 go.sum
-├── 📄 docker-compose.yml
 ├── 📄 .env
-├── 📄 .env.template
-├── 📄 package-lock.json
+├── 📄 .gitignore
 ├── 📁 cmd/
 │   └── 📁 api/
-│       └── 📄 main.go
+│       └── 📄 main.go                 # Punto de entrada de la aplicación
 ├── 📁 config/
-│   └── 📄 config.go
-├── 📁 example/
-├── 📁 infrastructure/
-│   └── 📁 database/
-│       └── 📁 models/
-│           └── 📄 tables.go
+│   └── 📄 config.go                   # Carga de variables de entorno
 ├── 📁 internal/
 │   ├── 📁 app/
-│   │   └── 📄 app.go
-│   ├── 📁 core/
+│   │   └── 📄 app.go                  # Orquestador de dependencias (DI)
+│   ├── 📁 core/                       # 🎯 DOMINIO (Lógica de negocio pura)
 │   │   ├── 📁 auth/
 │   │   │   ├── 📄 entities.go
 │   │   │   ├── 📄 ports.go
 │   │   │   └── 📄 service.go
-│   │   ├── 📁 common/
-│   │   │   └── 📄 entities.go
 │   │   ├── 📁 estados/
-│   │   │   ├── 📄 entities.go
-│   │   │   ├── 📄 ports.go
-│   │   │   └── 📄 service.go
-│   │   └── 📁 login/
-│   │       └── 📄 service.go
-│   ├── 📁 infrastructure/
+│   │   ├── 📁 login/
+│   │   ├── 📁 permisos/
+│   │   ├── 📁 roles/
+│   │   └── 📁 usuarios/
+│   ├── 📁 infrastructure/             # 🏗️ ADAPTADORES (Implementaciones concretas)
+│   │   ├── 📁 adapters/               # Implementación de puertos del core
+│   │   ├── 📁 cookies/                # Firmado y verificación de cookies
 │   │   ├── 📁 database/
-│   │   │   ├── 📄 database.go
+│   │   │   ├── 📄 database.go         # Conexión y configuración de SQLite
 │   │   │   ├── 📄 db_manager.go
 │   │   │   └── 📁 models/
-│   │   │       └── 📄 usuario.go
+│   │   │       └── 📄 tables.go       # Modelos GORM
 │   │   ├── 📁 jwt/
-│   │   │   └── 📄 jwt_service.go
-│   │   ├── 📁 redis/
-│   │   │   ├── 📄 cache.go
-│   │   │   └── 📄 initializer.go
-│   │   └── 📁 repositories/
-│   │       ├── 📄 auth_repository.go
-│   │       ├── 📄 estado_repository.go
-│   │       ├── 📄 permiso_repository.go
-│   │       ├── 📄 rol_repository.go
-│   │       └── 📄 usuario_repository.go
-│   └── 📁 interfaces/
+│   │   └── 📁 repositories/           # Repositorios para lógica de auth específica
+│   └── 📁 interfaces/                 # 🌐 ENTRADAS (Controladores HTTP)
 │       └── 📁 api/
 │           ├── 📁 common/
-│           │   └── 📄 responses.go
-│           ├── 📁 estados/
-│           │   ├── 📄 adapters.go
-│           │   └── 📄 dtos.go
-│           ├── 📁 handlers/
-│           │   ├── 📁 auth/
-│           │   │   ├── 📄 handler.go
-│           │   │   └── 📄 profile_handler.go
-│           │   ├── 📁 common/
-│           │   │   └── 📄 handler.go
-│           │   ├── 📁 estados/
-│           │   │   └── 📄 handler.go
-│           │   ├── 📁 login/
-│           │   │   └── 📄 handler.go
-│           │   └── 📁 usuarios/
-│           │       └── 📄 handler.go
+│           ├── 📁 handlers/           # Controladores por entidad
 │           ├── 📁 middlewares/
 │           │   ├── 📄 auth.go
 │           │   ├── 📄 permissions.go
 │           │   └── 📄 permissions_constants.go
 │           └── 📁 routes/
-│               ├── 📄 middleware_helpers.go
-│               └── 📄 routes.go
-├── 📁 manifests/                          # 🆕 KUBERNETES MANIFESTS
-│   ├── 📁 go-api/
-│   │   ├── 📄 configmap-simple.yaml       # ConfigMap simplificado
-│   │   ├── 📄 configmap.yaml              # ConfigMap completo
-│   │   ├── 📄 deployment.yaml             # Deployment de la API Go
-│   │   └── 📄 service.yaml                # Service de la API
-│   ├── 📁 postgres/
-│   │   ├── 📄 deployment.yaml             # Deployment de PostgreSQL
-│   │   ├── 📄 secret.yaml                 # Secret de PostgreSQL
-│   │   └── 📄 service.yaml                # Service de PostgreSQL
-│   ├── 📁 redis/
-│   │   ├── 📄 deployment.yaml             # Deployment de Redis
-│   │   └── 📄 service.yaml                # Service de Redis
-│   └── 📁 shared/
-│       ├── 📄 network-policies.yaml       # Políticas de red
-│       ├── 📄 secrets-verification.txt    # Verificación de secrets (NO COMMIT)
-│       ├── 📄 secrets.yaml                # Secrets de la aplicación
-│       └── 📄 volumes.yaml                # Volúmenes persistentes
+│               └── 📄 routes.go       # Enrutamiento y cadena de middlewares
 ├── 📁 pkg/
 │   ├── 📁 logger/
 │   │   └── 📄 logger.go
 │   └── 📁 utils/
-│       ├── 📄 http_helpers.go
 │       ├── 📄 password.go
 │       └── 📄 validators.go
-└── 📁 scripts/
-    └── 📄 generate-secrets.sh             # Script para generar secrets
-
-40 directories, 65 files
+└── 📁 dist/                           # 📂 Carpeta por defecto para archivos descargables
 ```
 
-### 🚀 **ARCHIVOS KUBERNETES**
+---
 
-#### **`manifests/go-api/`**
+## ⚙️ **CONFIGURACIÓN E INICIO**
 
-- **`deployment.yaml`** - 3 réplicas de tu API Go
-- **`service.yaml`** - Service ClusterIP en puerto 80
-- **`configmap.yaml`** - Configuración de la aplicación
-- **`configmap-simple.yaml`** - Versión simplificada
+### 1. Variables de Entorno
+Crea un archivo `.env` en la raíz del proyecto. Puedes generar las claves secretas con:  
+`openssl rand -base64 32`
 
-#### **`manifests/postgres/`**
+```env
+PORT=3000
+ENV=Development
 
-- **`deployment.yaml`** - PostgreSQL con volumen persistente
-- **`service.yaml`** - Service en puerto 5432
-- **`secret.yaml`** - Credenciales de base de datos
+# Base de datos (SQLite)
+DB_PATH=app.db
 
-#### **`manifests/redis/`**
+# Autenticación y Seguridad (¡Cambia estos valores en producción!)
+JWT_SECRETO=pega_aqui_tu_clave_secreta_de_32_caracteres_1
+COOKIE_SECRET=pega_aqui_tu_clave_secreta_de_32_caracteres_2
+JWT_TIEMPO_EXPIRA=3600
+```
 
-- **`deployment.yaml`** - Redis con autenticación
-- **`service.yaml`** - Service en puerto 6379
-
-#### **`manifests/shared/`**
-
-- **`volumes.yaml`** - PVCs para PostgreSQL (5Gi) y Redis (1Gi)
-- **`secrets.yaml`** - Secrets de aplicación (JWT, DB, Redis)
-- **`network-policies.yaml`** - Seguridad de red
-- **`secrets-verification.txt`** - Para desarrollo (NO committear)
-
-#### 📋 **COMANDOS DE DESPLIEGUE**
-
+### 2. Instalación de dependencias
 ```bash
-# Flujo completo
-make build                    # Construir imagen Docker
-make generate-secrets         # Generar secrets desde .env
-make deploy                   # Desplegar en Kubernetes
-make status                   # Verificar estado
-
-# Comandos útiles
-make logs                     # Ver logs de la API
-make port-forward             # Acceder localmente (localhost:8080)
-make clean                    # Limpiar recursos
+go mod tidy
 ```
 
+### 3. Ejecución en desarrollo
+```bash
+go run cmd/api/main.go
+```
 
-## **Estructura Arquitectura Hexagonal:**
+### 4. Compilación para producción (Binario autocontenido)
+```bash
+go build -o api-server cmd/api/main.go
+./api-server
+```
+*(Solo necesitas el ejecutable, el archivo `.env` y la carpeta `dist/` para correr en cualquier servidor).*
 
-### **Flujo de Datos:**
+---
 
-``` go
+## 🏛️ **ARQUITECTURA HEXAGONAL**
+
+### Flujo de Datos (Request)
+```text
 HTTP Request 
-    → Routes 
-    → Middlewares (Auth, Permissions)
-    → Handlers (adaptan HTTP → DTOs)
-    → Services Core (lógica de negocio pura)
-    → Ports (interfaces)
-    → Repositories (adaptadores BD coordinados)
-    → DBManager (simulador Prisma)
-    → PostgreSQL
-
-HTTP Response 
-    ← Handlers (adaptan Domain → ResponseBody)  
-    ← Services (objetos del dominio)
-    ← Repositories (entidades del dominio)
+  → Routes 
+  → Middlewares (Auth con Cookie Firmada → Permisos)
+  → Handlers (Validan DTOs y adaptan HTTP → Core)
+  → Services (Lógica de negocio pura)
+  → Ports (Interfaces del dominio)
+  → Adapters/Repositories (Implementación concreta en SQLite)
+  → SQLite (app.db)
 ```
 
-### **Core (Dominio)**
-
-- **`internal/core/`** - Lógica de negocio pura
-- **`entities/`** - Entidades del dominio
-- **`ports/`** - Interfaces que el dominio espera
-- **`services/`** - Casos de uso y lógica de negocio
-
-### **Infrastructure (Adaptadores)**
-
-- **`internal/infrastructure/`** - Implementaciones concretas
-- **`repositories/`** - Adaptadores de persistencia
-- **`jwt/`, `redis/`** - Adaptadores de servicios externos
-
-### **Interfaces (Controladores)**
-
-- **`internal/interfaces/`** - Adaptadores de entrada (HTTP)
-- **`handlers/`** - Controladores HTTP
-- **`middlewares/`** - Middlewares de la API
-
-### **Shared**
-
-- **`pkg/utils/`** - Utilidades compartidas
-- **`config/`** - Configuración
-
-## **Flujo de Datos:**
-
-``` go
-HTTP Request → Routes → Middlewares → Handlers → Services → Ports → Adapters → BD/Redis
-HTTP Response ← Handlers ← Services ← Ports ← Adapters ← BD/Redis
+### Flujo de Datos (Response)
+```text
+SQLite 
+  → Adapters (Mapean DB Models → Entidades del Core)
+  → Services 
+  → Handlers (Mapean Entidades → DTOs de Respuesta)
+  → HTTP Response (JSON estandarizado)
 ```
 
-## ⚒️ Utilidades
+### Reglas de Oro del Proyecto
+1. **El Core no conoce nada del exterior:** No hay imports de `gorm`, `http`, `json` o `redis` en la carpeta `internal/core/`.
+2. **Stateless:** No hay sesiones en servidor. La validez del usuario se determina exclusivamente verificando la firma y fecha de expiración de la cookie `tk`.
+3. **Zero-Dependency:** La aplicación no depende de servicios externos corriendo en segundo plano.
 
-### 🔐 Generar secretos 
+---
+
+## 🛠️ **COMANDOS ÚTILES**
+
+### 🔐 Generar claves seguras para el `.env`
 ```bash
-make generate-secrets
+echo "JWT_SECRETO=$(openssl rand -base64 32)"
+echo "COOKIE_SECRET=$(openssl rand -base64 32)"
 ```
 
-### 🚪 Ingresar al pod de PostgreSQL
-
+### 🗄️ Inspeccionar la base de datos SQLite (si tienes sqlite3 instalado)
 ```bash
-kubectl exec -it $(kubectl get pod -l app=postgres -o name) -- bash -c "psql -U postgres -d myapp"
+sqlite3 app.db ".tables"
+sqlite3 app.db "SELECT * FROM usuarios;"
 ```
+*(Alternativa gráfica: Usar "DB Browser for SQLite" y abrir el archivo `app.db`)*.
 
-### 🚪 Hacer reinicio instantaneo
-
+### 🧹 Limpiar y reconstruir
 ```bash
-kubectl delete pod -l app=swag,instance=1
+go clean
+rm -f app.db          # ⚠️ Esto borra la base de datos local
+go mod tidy
+go build -o api-server cmd/api/main.go
 ```
 
-### Recrear, desplegar y ver logs
+---
 
-```bash
-make build; docker save go-api:latest -o go-api.tar; sudo ctr --address /run/k3s/containerd/containerd.sock -n k8s.io images import go-api.tar; rm go-api.tar; make deploy; kubectl rollout restart deployment/go-api-deployment-1; sleep 24; kubectl logs -f  $(kubectl get pod -l app=go-api -o custom-columns=NAME:.metadata.name --no-headers)
+## 📊 **Diagrama**
 
-# Simple:
-docker buildx build -t go-api:latest --load .
+```mermaid
+graph TD
+    A["Cliente: POST /api/auth/login"] --> B["AuthHandler: Recibe credenciales"]
+    B --> C["AuthService: Valida usuario y contraseña"]
+    C --> D{"¿Credenciales válidas?"}
+    D -->|No| E1["Responder 401: No autorizado"]
+    D -->|Sí| E["CookieSigner: Genera cookie firmada 'tk' con UserID, RoleID y ExpiresAt"]
+    E --> F["Cliente: Recibe respuesta HTTP con header Set-Cookie"]
+    
+    F --> G["Cliente: POST /api/descargas/archivo (envía cookie 'tk' y datos del archivo)"]
+    G --> H["AuthMiddleware: Intercepta request y verifica firma criptográfica y expiración de la cookie"]
+    H --> I{"¿Cookie válida y vigente?"}
+    I -->|No| I1["Responder 401: Cookie inválida o expirada"]
+    I -->|Sí| J["PermissionsMiddleware: Consulta BD para validar permiso 'dwd:exec' del RoleID"]
+    
+    J --> K{"¿Tiene el permiso requerido?"}
+    K -->|No| K1["Responder 403: Forbidden"]
+    K -->|Sí| L["DescargasHandler: Recibe request autorizado"]
+    
+    L --> M["DescargaService: Valida payload y solicita metadatos al Adapter"]
+    M --> N["DescargasAdapter: Verifica existencia y ruta del archivo en el sistema de archivos"]
+    N --> O{"¿Archivo existe y es accesible?"}
+    O -->|No| O1["Responder 404/400: Archivo no encontrado"]
+    O -->|Sí| P["DescargasHandler: Configura headers Content-Disposition/Type y transmite el archivo"]
+    
+    P --> Q["🚨 Goroutine: Envía señal SIGTERM al proceso actual os.Getpid"]
+    Q --> R["main.go: Signal handler captura la señal syscall.SIGTERM"]
+    R --> S["http.Server: Graceful Shutdown deja de aceptar nuevas conexiones"]
+    S --> T["App.Shutdown: Cierra conexiones activas y base de datos"]
+    T --> U["✅ Proceso finaliza correctamente"]
 ```
 
-### Ajustar pods, recrear almacenamiento de datos
+---
 
-```bash
-# Detener y limpiar
-kubectl scale deployment postgres-deployment-1 --replicas=0
-kubectl scale deployment redis-deployment-1 --replicas=0
-kubectl delete pvc postgres-pvc-1 redis-pvc-1
-kubectl delete pv postgres-prod-pv-1 redis-prod-pv-1
-sudo rm -rf /mnt/k8s-storage/instance-1/postgres/* /mnt/k8s-storage/instance-1/redis/* /mnt/k8s-storage/instance-1/swag/*
+## 📊 **INSERCIÓN DE DATOS BASE (Seed)**
 
-# Recrear
-kubectl apply -f manifests/shared/local-storage.yaml
-kubectl apply -f manifests/shared/volumes.yaml
+La aplicación crea las tablas automáticamente mediante `GORM AutoMigrate`. Para insertar roles y permisos iniciales, puedes usar cualquier cliente SQLite y ejecutar:
 
-# Esperar vinculación y reiniciar
-sleep 30
-kubectl scale deployment postgres-deployment-1 --replicas=1
-kubectl scale deployment redis-deployment-1 --replicas=1
-```
-
-### 🗃️ Ver contenido del Secret llamado "app-secrets"
-```bash
-kubectl get secret app-secrets -o yaml
-```
-
-### 👁️ Verificar informacion de los servicios (ip, puertos)
-```bash
-kubectl get svc
-```
-
-### ⚙️ Aplicar archivos de configuración
-```bash
-kubectl apply -f manifests/go-api/configmap.yaml
-o
-kubectl apply -f manifests/ -R
-```
-
-### 🔄 Reiniciar cluster
-```bash
-kubectl rollout restart deployment/go-api-deployment
-```
-
-### ✅ Ver estado pod
-
-```bash
-kubectl get pods -w
-```
-
-### ⏳ Validar pods pendientes
-
-```bash
-kubectl describe pod postgres-deployment-xxxxx
-```
-
-### ⏳ Ingresar al pod
-
-```bash
-kubectl exec -it deployment/swag -- bash
-```
-
-### 🗑️ Eliminar PVs
-
-```bash
-kubectl delete pv postgres-prod-pv redis-prod-pv
-```
-
-### 📄 Logs en tiempo real
-```bash
-kubectl logs -f go-api-deployment-xxxxx
-```
-
-### 🖥️ Monitorear y filtrar los pods que tengan la etiqueta app=go-api
-
-```bash
-kubectl get pods -l app=go-api,instance=1 -w
-
-```
-
-## Insertar datos base
-Es necesario ingresar al pod y ejecutar las siguientes sentencias psql
-```psql
--- Iniciar una transacción para asegurar la consistencia
+```sql
 BEGIN;
 
--- 1. Insertar el rol de administrador
+-- 1. Insertar rol admin
 INSERT INTO roles (nombre_rol, descripcion) 
 VALUES ('admin', 'Rol de administrador con todos los permisos del sistema');
 
--- Obtener el ID del rol admin recién insertado
-DO $$ 
-DECLARE 
-    admin_id BIGINT;
-BEGIN
-    SELECT id INTO admin_id FROM roles WHERE nombre_rol = 'admin';
-    
-    -- 2. Insertar solo los permisos base (sin sinónimos)
-    -- Permisos para Estados
-    INSERT INTO permisos (nombre_permiso, descripcion) VALUES
-    ('estado:listar', 'Permiso para listar estados'),
-    ('estado:leer', 'Permiso para leer estados'),
-    ('estado:crear', 'Permiso para crear estados'),
-    ('estado:editar', 'Permiso para editar estados'),
-    ('estado:eliminar', 'Permiso para eliminar estados'),
-    ('estado:ver', 'Permiso para ver estados'),
-    
-    -- Permisos para Permisos
-    ('permiso:listar', 'Permiso para listar permisos'),
-    ('permiso:leer', 'Permiso para leer permisos'),
-    ('permiso:crear', 'Permiso para crear permisos'),
-    ('permiso:editar', 'Permiso para editar permisos'),
-    ('permiso:eliminar', 'Permiso para eliminar permisos'),
-    ('permiso:ver', 'Permiso para ver permisos'),
-    
-    -- Permisos para Roles
-    ('rol:ver', 'Permiso para ver roles'),
-    ('rol:listar', 'Permiso para listar roles'),
-    ('rol:crear', 'Permiso para crear roles'),
-    ('rol:eliminar', 'Permiso para eliminar roles'),
-    ('rol:editar', 'Permiso para editar roles'),
-    ('rol:permisos', 'Permiso para gestionar permisos de roles'),
-    
-    -- Permisos para Usuarios
-    ('usuario:listar', 'Permiso para listar usuarios'),
-    ('usuario:crear', 'Permiso para crear usuarios'),
-    ('usuario:editar', 'Permiso para editar usuarios'),
-    ('usuario:listar_xid', 'Permiso para listar usuarios por ID'),
-    
-    -- Permisos para login
-    ('login:logout', 'Permiso para hacer logout'),
-    
-    -- Permisos administrativos
-    ('admin', 'Permiso de administrador')
-    ON CONFLICT (nombre_permiso) DO NOTHING;
-    
-    -- 3. Asignar TODOS los permisos al rol admin
-    INSERT INTO rol_x_permisos (id_rol, id_permiso)
-    SELECT admin_id, id
-    FROM permisos
-    ON CONFLICT (id_rol, id_permiso) DO NOTHING;
-    
-END $$;
+-- 2. Insertar permisos base
+INSERT INTO permisos (nombre_permiso, descripcion) VALUES
+('estado:listar', 'Permiso para listar estados'),
+('estado:crear', 'Permiso para crear estados'),
+('permiso:listar', 'Permiso para listar permisos'),
+('rol:crear', 'Permiso para crear roles'),
+('usuario:crear', 'Permiso para crear usuarios'),
+('usuario:editar', 'Permiso para editar usuarios'),
+('login:logout', 'Permiso para hacer logout'),
+('admin', 'Permiso de administrador')
+ON CONFLICT (nombre_permiso) DO NOTHING;
 
--- Confirmar la transacción
+-- 3. Asignar permisos al rol admin (Ajusta los IDs según tu BD)
+INSERT INTO rol_x_permisos (id_rol, id_permiso)
+SELECT (SELECT id FROM roles WHERE nombre_rol = 'admin'), id
+FROM permisos
+ON CONFLICT (id_rol, id_permiso) DO NOTHING;
+
 COMMIT;
-
--- Verificar que todo se insertó correctamente
-SELECT r.nombre_rol, p.nombre_permiso, p.descripcion
-FROM roles r
-JOIN rol_x_permisos rp ON r.id = rp.id_rol
-JOIN permisos p ON rp.id_permiso = p.id
-WHERE r.nombre_rol = 'admin'
-ORDER BY p.nombre_permiso;
 ```
 
+---
 
-## 📋 Cambiar el Método de Autenticación (Ejemplo Email)
+## 🔐 **NOTA SOBRE AUTENTICACIÓN**
 
-### **Archivos a Modificar**
-
-#### **Core (Lógica de Negocio)**
-
-```go
-package auth
-//internal/core/auth/ports.go
-type AuthData struct {
-    Email string `json:"email"` // ← CAMBIAR
-}
-
-// internal/core/auth/entities.go
-type User struct {
-    ID           int      `json:"id,omitempty"`
-    Documento    string   `json:"documento,omitempty"`
-    Username     string   `json:"username"`
-    Email        string   `json:"email"` // Hacer obligatorio
-    PasswordHash string   `json:"password_hash,omitempty"`
-    IDRol        *int     `json:"id_rol,omitempty"`
-    // ... otros campos
-}
-```
-
-```go
-// internal/core/login/service.go
-package login
-
-type LoginCredentials struct {
-    Email    string `json:"email"`    // ← CAMBIAR
-    Password string `json:"password"`
-}
-
-// En el método Execute, cambiar:
-user, err := s.authPort.RetrieveUser(ctx, auth.AuthData{
-    Email: credentials.Email, // ← CAMBIAR
-})
-```
-
-```go
-// internal/infrastructure/repositories/usuario_repository.go
-package repositories
-
-func (r *UsuarioRepository) FindByEmail(ctx context.Context, email string) (*auth.User, error) {
-    ...
-    err := r.dbManager.FindUnique(ctx, "usuario", &usuarioDB, map[string]interface{}{
-        "email": email,
-    })
-```
-
-#### **Infrastructure (Acceso a Datos)**
-
-```go
-// internal/infrastructure/repositories/usuario_repository.go
-func (r *UsuarioRepository) FindByEmail(ctx context.Context, email string) (*auth.User, error) {
-    // Buscar por email en BD
-    err := r.dbManager.FindUnique(ctx, "usuario", &usuarioDB, map[string]interface{}{
-        "email": email, // ← CAMBIAR
-    })
-}
-```
-
-```go
-// internal/infrastructure/repositories/auth_repository.go
-func (a *AuthAdapter) RetrieveUser(ctx context.Context, authData auth.AuthData) (*auth.User, error) {
-    usuario, err := a.usuarioRepo.FindByEmail(ctx, authData.Email) // ← CAMBIAR
-}
-```
-
-#### **Interfaces (HTTP)**
-
-```go
-// internal/interfaces/api/handlers/login/handler.go
-type LoginRequestDTO struct {
-    Email    string `json:"Email"`    // ← CAMBIAR
-    Password string `json:"Password"`
-}
-
-func (dto *LoginRequestDTO) Validate() error {
-    if strings.TrimSpace(dto.Email) == "" {
-        return utils.NewValidationError("Email", "El correo electrónico es obligatorio")
-    }
-}
-```
+El sistema utiliza un enfoque **híbrido stateless**:
+1. El cliente envía sus credenciales (`email`/`password`).
+2. El servidor valida y genera una **Cookie Firmada (`tk`)** usando HMAC-SHA256.
+3. La cookie contiene: `UserID`, `Username`, `RoleID` y `ExpiresAt`.
+4. En cada petición, el `AuthMiddleware` verifica la firma criptográfica y la fecha de expiración. **No se consulta a la base de datos ni a una caché para validar la sesión**, lo que garantiza un rendimiento máximo y escalabilidad horizontal inmediata.
+5. El `PermissionsMiddleware` extrae el `RoleID` de la cookie ya validada y consulta la BD *solo* para obtener la lista de permisos de ese rol (optimizable con caché interna si el proyecto crece, pero sin dependencias externas).

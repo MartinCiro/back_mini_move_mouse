@@ -8,12 +8,12 @@ import (
 
 type AuthPort interface {
 	RetrieveUser(ctx context.Context, authData AuthData) (*User, error)
-	RetrieveUserByID(ctx context.Context, userID int) (*User, error)
+	RetrieveUserByID(ctx context.Context, documento string) (*User, error)
 	GetPermissionsByRoleID(ctx context.Context, roleID int) ([]string, error)
 }
 
 type UserRepositoryPort interface {
-	CreateUser(ctx context.Context, usuario *Usuario, email string) (int, error)
+	CreateUser(ctx context.Context, usuario *Usuario) (string, error)
 }
 
 type RolRepositoryPort interface {
@@ -30,14 +30,13 @@ type EstadoRepositoryPort interface {
 }
 
 type AuthData struct {
-	Username string `json:"username,omitempty"`
-	Email    string `json:"email,omitempty"`
+	Documento string `json:"documento,omitempty"`
+	Username  string `json:"username,omitempty"`
 }
 
 type User struct {
 	ID           string   `json:"id"`
 	Username     string   `json:"username,omitempty"`
-	Email        string   `json:"email"`
 	PasswordHash string   `json:"password_hash,omitempty"`
 	IDRol        *int     `json:"id_rol,omitempty"`
 	IDEstado     *int     `json:"id_estado,omitempty"`

@@ -3,82 +3,29 @@ services:
     build: .
     container_name: go_backend
     restart: always
-    depends_on:
-      - redis
-      - postgres
     ports:
-      - "8080:8080"
+      - "8080:8080" # Asegúrate de que coincida con PORT en tu .env (o cámbialo a "3000:3000")
     environment:
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=${USER_DB:-postgres} 
-      - DB_PASSWORD=${PASS_DB:-password}
-      - DB_NAME=${NAME_DB}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379/0
-      - JWT_SECRET=${JWT_SECRETO}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      - JWT_SALT=${JWT_SALT}
       - ENV=${ENV:-development}
       - PORT=8080
+      # Base de datos SQLite (Ruta interna del contenedor para persistencia)
+      - DB_PATH=/app/data/app.db
+      # Autenticación
+      - JWT_SECRETO=${JWT_SECRETO}
+      - COOKIE_SECRET=${COOKIE_SECRET}
+      - JWT_TIEMPO_EXPIRA=${JWT_TIEMPO_EXPIRA:-3600}
+    volumes:
+      # Montamos un volumen para que la base de datos SQLite no se borre al reiniciar el contenedor
+      - sqlite_data:/app/data
     networks:
       - docker_app_network
 
-  redis:
-    image: redis:latest
-    container_name: redis_service-1
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"] 
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-    volumes:
-      - redis_data:/data
-    networks:
-      - docker_app_network
-    ports:
-      - ${REDIS_PORT}:6379
-    command: >
-      sh -c "
-      if [ -n \"$$REDIS_PASSWORD\" ]; then
-        redis-server --requirepass $$REDIS_PASSWORD
-      else
-        redis-server
-      fi"
-  
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres-service-1
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${USER_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-    environment:
-      POSTGRES_USER: ${USER_DB}
-      POSTGRES_PASSWORD: ${PASS_DB}
-      POSTGRES_DB: ${NAME_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - docker_app_network
-    ports:
-      - "5433:5432"
-
+# Eliminamos los volúmenes de redis y postgres
 volumes:
-  redis_data:
-    driver: local
-  postgres_data:
+  sqlite_data:
     driver: local
 
+# La red se mantiene por si en el futuro agregas un proxy inverso (como Nginx o Traefik)
 networks:
   docker_app_network:
     driver: bridge

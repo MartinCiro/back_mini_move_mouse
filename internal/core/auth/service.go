@@ -1,18 +1,13 @@
-// internal/core/auth/service.go
 package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
-	"strconv"
 	"strings"
 	"time"
 
 	"api_go/config"
 	"api_go/internal/infrastructure/cookies"
-	"api_go/internal/infrastructure/redis"
 	"api_go/internal/interfaces/api/common"
 	"api_go/pkg/logger"
 	"api_go/pkg/utils"
@@ -20,19 +15,16 @@ import (
 
 type AuthService struct {
 	authPort        AuthPort
-	redisService    *redis.Cache
 	cookieSigner    *cookies.CookieSigner
 	passwordService *utils.PasswordService
 	userRepo        UserRepositoryPort
 	rolRepo         RolRepositoryPort
 	estadoRepo      EstadoRepositoryPort
 	config          *config.Config
-	refreshService  *RefreshService
 }
 
 func NewAuthService(
 	authPort AuthPort,
-	redisService *redis.Cache,
 	cookieSigner *cookies.CookieSigner,
 	passwordService *utils.PasswordService,
 	userRepo UserRepositoryPort,
@@ -40,45 +32,21 @@ func NewAuthService(
 	estadoRepo EstadoRepositoryPort,
 	config *config.Config,
 ) *AuthService {
-
-	// Configurar tiempos de sesión
-	sessionTTL := time.Duration(config.SessionTTL) * time.Second
-	refreshThreshold := time.Duration(config.RefreshThreshold) * time.Second
-
-	refreshService := NewRefreshService(
-		redisService,
-		cookieSigner,
-		sessionTTL,
-		refreshThreshold,
-	)
-
 	return &AuthService{
 		authPort:        authPort,
-		redisService:    redisService,
 		cookieSigner:    cookieSigner,
 		passwordService: passwordService,
 		userRepo:        userRepo,
 		rolRepo:         rolRepo,
 		estadoRepo:      estadoRepo,
 		config:          config,
-		refreshService:  refreshService, // ← INYECTADO
 	}
 }
 
+// ✅ CAMBIADO: Login ahora usa Documento en lugar de Email
 type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-type LoginResponse struct {
-	User *User `json:"user"`
-}
-
-type UserCacheData struct {
-	IDUser   string   `json:"id_user"`
-	Nombre   string   `json:"nombre"`
-	IDRol    *int     `json:"id_rol"`
-	Permisos []string `json:"permisos"`
+	Documento string `json:"documento"`
+	Password  string `json:"password"`
 }
 
 type ProfileResponse struct {
@@ -94,22 +62,24 @@ type AuthResponse struct {
 }
 
 func (s *AuthService) LoginUser(ctx context.Context, req LoginRequest) (*AuthResponse, string, time.Time, error) {
-	if req.Email == "" {
-		return nil, "", time.Time{}, fmt.Errorf("email o contraseña inválida")
+	if req.Documento == "" {
+		return nil, "", time.Time{}, fmt.Errorf("documento o contraseña inválida")
 	}
 
-	usuarioRetrieved, err := s.authPort.RetrieveUser(ctx, AuthData{Email: req.Email})
+	// ✅ CAMBIADO: Buscar por Documento
+	usuarioRetrieved, err := s.authPort.RetrieveUser(ctx, AuthData{Documento: req.Documento})
 	if err != nil {
-		logger.Error("❌ Error buscando usuario", "email", req.Email, "error", err)
-		return nil, "", time.Time{}, fmt.Errorf("email o contraseña inválida")
+		logger.Error("❌ Error buscando usuario", "documento", req.Documento, "error", err)
+		return nil, "", time.Time{}, fmt.Errorf("documento o contraseña inválida")
 	}
 
 	if usuarioRetrieved == nil || usuarioRetrieved.ID == "" {
-		logger.Error("❌ Usuario no encontrado", "email", req.Email)
-		return nil, "", time.Time{}, fmt.Errorf("email o contraseña inválida")
+		logger.Error("❌ Usuario no encontrado", "documento", req.Documento)
+		return nil, "", time.Time{}, fmt.Errorf("documento o contraseña inválida")
 	}
 
 	usuario := NewUsuarioFromEncrypted(
+		usuarioRetrieved.ID,
 		usuarioRetrieved.Username,
 		usuarioRetrieved.PasswordHash,
 		usuarioRetrieved.IDRol,
@@ -118,10 +88,10 @@ func (s *AuthService) LoginUser(ctx context.Context, req LoginRequest) (*AuthRes
 
 	isPasswordValid := usuario.ComparePassword(req.Password, s.passwordService)
 	if !isPasswordValid {
-		return nil, "", time.Time{}, fmt.Errorf("email o contraseña inválida")
+		return nil, "", time.Time{}, fmt.Errorf("documento o contraseña inválida")
 	}
 
-	// ✅ OBTENER PERMISOS PARA EL USUARIO
+	// ✅ OBTENER PERMISOS DIRECTO DE LA BD (Sin Redis)
 	permisos, err := s.authPort.GetPermissionsByRoleID(ctx, *usuarioRetrieved.IDRol)
 	if err != nil {
 		logger.Error("❌ Error obteniendo permisos durante login",
@@ -131,54 +101,11 @@ func (s *AuthService) LoginUser(ctx context.Context, req LoginRequest) (*AuthRes
 		return nil, "", time.Time{}, fmt.Errorf("error obteniendo permisos del usuario: %v", err)
 	}
 
-	// ✅ VERIFICAR QUE EL USUARIO TENGA PERMISOS
 	if len(permisos) == 0 {
 		logger.Warn("⚠️ Usuario sin permisos asignados durante login",
 			"userID", usuarioRetrieved.ID,
 			"roleID", *usuarioRetrieved.IDRol)
 		return nil, "", time.Time{}, fmt.Errorf("usuario sin permisos asignados")
-	}
-
-	userCacheKey := fmt.Sprintf("user:%s", usuarioRetrieved.ID)
-	eventKey := fmt.Sprintf("event:usuario.logeado:%s", usuarioRetrieved.ID)
-
-	cachedUser, err := s.redisService.Get(ctx, userCacheKey)
-	var userData UserCacheData
-
-	if err == nil && cachedUser != "" {
-		err = json.Unmarshal([]byte(cachedUser), &userData)
-		if err != nil {
-			s.redisService.Delete(ctx, userCacheKey)
-			userData = UserCacheData{}
-		}
-	}
-
-	if userData.IDUser == "" {
-		// ✅ GUARDAR PERMISOS EN EL CACHE
-		userData = UserCacheData{
-			IDUser:   usuarioRetrieved.ID,
-			Nombre:   usuarioRetrieved.Username,
-			IDRol:    usuarioRetrieved.IDRol,
-			Permisos: permisos,
-		}
-
-		userDataJSON, err := json.Marshal(userData)
-		if err != nil {
-			logger.Error("Error marshaling user cache data:", err)
-		} else {
-			logger.Info("🔍 Guardando usuario con permisos en cache",
-				"userID", usuarioRetrieved.ID,
-				"permisosCount", len(permisos))
-
-			err = s.redisService.Set(ctx, userCacheKey, userDataJSON, 24*time.Hour)
-			if err != nil {
-				logger.Error("Error setting user cache:", err)
-			} else {
-				logger.Info("✅ Usuario y permisos guardados en cache",
-					"userID", usuarioRetrieved.ID,
-					"permisos", permisos)
-			}
-		}
 	}
 
 	cookieData := &cookies.SignedCookieData{
@@ -195,36 +122,6 @@ func (s *AuthService) LoginUser(ctx context.Context, req LoginRequest) (*AuthRes
 		return nil, "", time.Time{}, fmt.Errorf("error generando cookie de autenticación: %v", err)
 	}
 
-	// ✅ CREAR SESIÓN EN REDIS después del login exitoso
-	userIDInt, err := strconv.Atoi(usuarioRetrieved.ID)
-	if err != nil {
-		logger.Error("❌ Error convirtiendo userID a int para sesión",
-			"userID", usuarioRetrieved.ID,
-			"error", err)
-		// No retornar error, solo loggear para no afectar el login
-	} else {
-		err = s.CreateUserSession(ctx, userIDInt, usuarioRetrieved.Username, usuarioRetrieved.RolNombre, *usuarioRetrieved.IDRol)
-		if err != nil {
-			logger.Error("❌ Error creando sesión en Redis",
-				"userID", userIDInt,
-				"error", err)
-			// No retornar error, solo loggear para no afectar el login
-		} else {
-			logger.Info("✅ Sesión creada exitosamente en Redis",
-				"userID", userIDInt,
-				"username", usuarioRetrieved.Username,
-				"role", usuarioRetrieved.RolNombre)
-		}
-	}
-
-	eventExists, err := s.redisService.Get(ctx, eventKey)
-	if err != nil || eventExists == "" {
-		err = s.redisService.Set(ctx, eventKey, "true", 1*time.Hour)
-		if err != nil {
-			logger.Error("Error setting event cache:", err)
-		}
-	}
-
 	response := &AuthResponse{
 		Message:   "Login exitoso",
 		ExpiresAt: cookieData.ExpiresAt,
@@ -234,53 +131,10 @@ func (s *AuthService) LoginUser(ctx context.Context, req LoginRequest) (*AuthRes
 }
 
 func (s *AuthService) GetUserProfile(ctx context.Context, userID string) (*common.ResponseBody[ProfileResponse], error) {
-	userIDInt, err := strconv.Atoi(userID)
+	// ✅ CAMBIADO: userID ya es string (Documento), no necesita conversión a int
+	usuarioRetrieved, err := s.authPort.RetrieveUserByID(ctx, userID)
 	if err != nil {
-		return nil, fmt.Errorf("ID de usuario inválido")
-	}
-
-	userCacheKey := fmt.Sprintf("user:%d", userIDInt)
-
-	cachedUser, err := s.redisService.Get(ctx, userCacheKey)
-	var userData UserCacheData
-
-	if err == nil && cachedUser != "" {
-		err = json.Unmarshal([]byte(cachedUser), &userData)
-		if err != nil {
-			logger.Error("Error parsing cached user data:", err)
-		}
-	}
-
-	var usuarioRetrieved *User
-	if len(userData.IDUser) == 0 {
-		usuarioRetrieved, err = s.authPort.RetrieveUserByID(ctx, userIDInt)
-		if err != nil {
-			return nil, fmt.Errorf("usuario no encontrado")
-		}
-
-		userData = UserCacheData{
-			IDUser:   usuarioRetrieved.ID,
-			Nombre:   usuarioRetrieved.Username,
-			IDRol:    usuarioRetrieved.IDRol,
-			Permisos: usuarioRetrieved.Permisos,
-		}
-
-		userDataJSON, err := json.Marshal(userData)
-		if err != nil {
-			log.Printf("Error marshaling user data for cache: %v", err)
-		} else {
-			if s.redisService != nil {
-				err = s.redisService.Set(ctx, userCacheKey, string(userDataJSON), 24*time.Hour)
-				if err != nil {
-					log.Printf("Error setting user cache: %v", err)
-				}
-			}
-		}
-	} else {
-		usuarioRetrieved, err = s.authPort.RetrieveUserByID(ctx, userIDInt)
-		if err != nil {
-			return nil, fmt.Errorf("usuario no encontrado")
-		}
+		return nil, fmt.Errorf("usuario no encontrado")
 	}
 
 	profileData := ProfileResponse{
@@ -298,89 +152,54 @@ func (s *AuthService) GetUserProfile(ctx context.Context, userID string) (*commo
 }
 
 type RegisterRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	RolId    *int   `json:"rol_nombre,omitempty"`
+	Documento string `json:"documento" validate:"required"`
+	Username  string `json:"username" validate:"required,min=3"`
+	Password  string `json:"password" validate:"required,min=6"`
+	RolID     *int   `json:"rol_id,omitempty"`
+	EstadoID  *int   `json:"estado_id,omitempty"`
 }
 
-func (s *AuthService) RegisterUser(ctx context.Context, req RegisterRequest, currentUser *User) (interface{}, string, time.Time, error) {
-	var rolNombre string
-	var estadoNombre string = "activo"
-
+func (s *AuthService) RegisterUser(ctx context.Context, req RegisterRequest, currentUser *User) (string, string, time.Time, error) {
+	// 1. Verificar permisos si hay un usuario actual (ej. un admin creando otro usuario)
 	if currentUser != nil {
 		hasPermission := s.hasPermission(currentUser.Permisos, "usuario:crear")
 		if !hasPermission {
-			return nil, "", time.Time{}, fmt.Errorf("No tiene permisos para crear usuarios")
+			return "", "", time.Time{}, fmt.Errorf("no tiene permisos para crear usuarios")
 		}
-
-		if req.RolId != nil {
-			rol, err := s.rolRepo.FindByID(ctx, *req.RolId)
-			if err != nil {
-				return nil, "", time.Time{}, fmt.Errorf("error buscando rol por ID: %v", err)
-			}
-			if rol == nil {
-				return nil, "", time.Time{}, fmt.Errorf("rol con ID %d no encontrado", *req.RolId)
-			}
-			rolNombre = rol.NombreRol
-		} else {
-			rolNombre = "usuario"
-		}
-	} else {
-		rolNombre = "invitado"
 	}
 
-	// LÓGICA SIMPLIFICADA: Usar FindOrCreateGuest para invitado, FindByExactName para otros
-	var rolID int
-	var err error
-
-	if rolNombre == "invitado" {
-		rolID, err = s.rolRepo.FindOrCreateGuest(ctx)
-	} else {
-		rol, err := s.rolRepo.FindByExactName(ctx, rolNombre)
-		if err != nil {
-			return nil, "", time.Time{}, fmt.Errorf("error buscando rol '%s': %v", rolNombre, err)
-		}
-		if rol == nil {
-			return nil, "", time.Time{}, fmt.Errorf("rol '%s' no encontrado", rolNombre)
-		}
-		rolID = rol.ID
+	// 2. Valores por defecto si no se proporcionan
+	rolID := 2 // Asumimos 2 = usuario normal
+	if req.RolID != nil {
+		rolID = *req.RolID
 	}
 
+	estadoID := 1 // Asumimos 1 = activo
+	if req.EstadoID != nil {
+		estadoID = *req.EstadoID
+	}
+
+	// 3. Crear entidad de dominio
+	newUser, err := NewUsuario(req.Documento, req.Username, req.Password, &rolID, &estadoID)
 	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("error procesando rol '%s': %v", rolNombre, err)
+		return "", "", time.Time{}, fmt.Errorf("error procesando usuario: %v", err)
 	}
 
-	// LÓGICA PARA ESTADO
-	estadoID, err := s.estadoRepo.FindOrCreateActive(ctx)
+	// 4. Guardar en base de datos
+	documento, err := s.userRepo.CreateUser(ctx, newUser)
 	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("error buscando/creando estado '%s': %v", estadoNombre, err)
-	}
-
-	newUser, err := NewUsuario(req.Username, req.Password, &rolID, &estadoID)
-	if err != nil {
-		return nil, "", time.Time{}, err
-	}
-
-	userID, err := s.userRepo.CreateUser(ctx, newUser, req.Email)
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
-			return nil, "", time.Time{}, fmt.Errorf("El usuario ya existe, inicie sesión para continuar")
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "duplicate") {
+			return "", "", time.Time{}, fmt.Errorf("El usuario ya existe")
 		}
-
 		logger.Error("No se pudo crear el usuario", "error", err)
-		return nil, "", time.Time{}, fmt.Errorf("Ha ocurrido un error en el servidor, contacte al administrador")
+		return "", "", time.Time{}, fmt.Errorf("ha ocurrido un error en el servidor")
 	}
 
-	user, err := s.authPort.RetrieveUserByID(ctx, userID)
-	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("error obteniendo usuario creado: %v", err)
-	}
-
+	// 5. Generar cookie de sesión inmediata para el nuevo usuario
 	cookieData := &cookies.SignedCookieData{
-		UserID:    user.ID,
-		Username:  user.Username,
-		Role:      rolNombre,
+		UserID:    documento,
+		Username:  req.Username,
+		Role:      "usuario",
 		RoleID:    rolID,
 		ExpiresAt: time.Now().Add(time.Duration(s.config.JWTExpireTime) * time.Second),
 		IssuedAt:  time.Now(),
@@ -388,15 +207,15 @@ func (s *AuthService) RegisterUser(ctx context.Context, req RegisterRequest, cur
 
 	signedCookie, err := s.cookieSigner.Sign(cookieData)
 	if err != nil {
-		return nil, "", time.Time{}, fmt.Errorf("error generando cookie de autenticación: %v", err)
+		return "", "", time.Time{}, fmt.Errorf("error generando cookie: %v", err)
 	}
 
-	// Retornar mensaje según el contexto
+	msg := "Usuario registrado con éxito"
 	if currentUser != nil {
-		return "Usuario creado correctamente", signedCookie, cookieData.ExpiresAt, nil
-	} else {
-		return "Usuario registrado con exito", signedCookie, cookieData.ExpiresAt, nil
+		msg = "Usuario creado correctamente por administrador"
 	}
+
+	return msg, signedCookie, cookieData.ExpiresAt, nil
 }
 
 func (s *AuthService) ValidateCookie(cookieValue string) (*User, error) {
@@ -407,7 +226,7 @@ func (s *AuthService) ValidateCookie(cookieValue string) (*User, error) {
 
 	ctx := context.Background()
 
-	// ✅ OBTENER PERMISOS - ES OBLIGATORIO
+	// ✅ OBTENER PERMISOS DIRECTO DE LA BD (Sin Redis)
 	permisos, err := s.authPort.GetPermissionsByRoleID(ctx, cookieData.RoleID)
 	if err != nil {
 		logger.Error("❌ Error crítico obteniendo permisos para validación de cookie",
@@ -417,7 +236,6 @@ func (s *AuthService) ValidateCookie(cookieValue string) (*User, error) {
 		return nil, fmt.Errorf("error validando permisos del usuario: %v", err)
 	}
 
-	// ✅ VERIFICAR QUE HAYA PERMISOS
 	if len(permisos) == 0 {
 		logger.Warn("⚠️ Usuario sin permisos asignados",
 			"userID", cookieData.UserID,
@@ -430,35 +248,14 @@ func (s *AuthService) ValidateCookie(cookieValue string) (*User, error) {
 		Username:  cookieData.Username,
 		RolNombre: cookieData.Role,
 		IDRol:     &cookieData.RoleID,
-		Permisos:  permisos, // ✅ PERMISOS OBLIGATORIOS
+		Permisos:  permisos,
 	}, nil
 }
 
-func (s *AuthService) Logout(ctx context.Context, userID int) error {
-	// ✅ ELIMINAR SESIÓN DE REDIS PRIMERO
-	err := s.DeleteUserSession(ctx, userID)
-	if err != nil {
-		logger.Error("❌ Error eliminando sesión de Redis",
-			"userID", userID,
-			"error", err)
-		// Continuar con el logout aunque falle eliminar la sesión
-	} else {
-		logger.Info("✅ Sesión eliminada de Redis", "userID", userID)
-	}
-
-	// ✅ LIMPIAR CACHE DE USUARIO (código existente)
-	userCacheKey := fmt.Sprintf("user:%d", userID)
-	if s.redisService != nil {
-		err = s.redisService.Delete(ctx, userCacheKey)
-		if err != nil {
-			logger.Error("Error clearing user cache:",
-				"userID", userID,
-				"error", err)
-		} else {
-			logger.Info("✅ Cache de usuario eliminado", "userID", userID)
-		}
-	}
-
+// ✅ CAMBIADO: userID ahora es string (Documento) para coincidir con el modelo
+func (s *AuthService) Logout(ctx context.Context, userID string) error {
+	// ✅ La invalidación de la sesión ahora es stateless.
+	// El middleware/handler se encarga de borrar la cookie del cliente.
 	return nil
 }
 
@@ -469,44 +266,4 @@ func (s *AuthService) hasPermission(permisos []string, permission string) bool {
 		}
 	}
 	return false
-}
-
-// CheckAndRefreshSession verifica y refresca la sesión si es necesario
-func (s *AuthService) CheckAndRefreshSession(ctx context.Context, userID int, username string, role string, roleID int, currentCookie string) (*RefreshResult, error) {
-	return s.refreshService.CheckAndRefresh(ctx, userID, username, role, roleID, currentCookie)
-}
-
-// CheckAndRefreshSessionFromCookie verifica y refresca directamente desde la cookie
-func (s *AuthService) CheckAndRefreshSessionFromCookie(ctx context.Context, currentCookie string) (*RefreshResult, error) {
-	return s.refreshService.CheckAndRefreshFromCookie(ctx, currentCookie)
-}
-
-// CreateUserSession crea una sesión para el usuario después del login
-func (s *AuthService) CreateUserSession(ctx context.Context, userID int, username string, role string, roleID int) error {
-	return s.refreshService.CreateSession(ctx, userID, username, role, roleID)
-}
-
-// UpdateUserSessionAccess actualiza el último acceso del usuario
-func (s *AuthService) UpdateUserSessionAccess(ctx context.Context, userID int) error {
-	return s.refreshService.UpdateSessionAccess(ctx, userID)
-}
-
-// GetSessionInfo obtiene información de la sesión actual
-func (s *AuthService) GetSessionInfo(ctx context.Context, userID int) (map[string]interface{}, error) {
-	return s.refreshService.GetSessionInfo(ctx, userID)
-}
-
-// ForceRefreshSession fuerza el refresh de una sesión
-func (s *AuthService) ForceRefreshSession(ctx context.Context, userID int, username string, role string, roleID int) (*RefreshResult, error) {
-	return s.refreshService.ForceRefresh(ctx, userID, username, role, roleID)
-}
-
-// DeleteUserSession elimina la sesión del usuario (para logout)
-func (s *AuthService) DeleteUserSession(ctx context.Context, userID int) error {
-	return s.refreshService.DeleteSession(ctx, userID)
-}
-
-// UserSessionExists verifica si el usuario tiene sesión activa
-func (s *AuthService) UserSessionExists(ctx context.Context, userID int) (bool, error) {
-	return s.refreshService.SessionExists(ctx, userID)
 }

@@ -22,12 +22,14 @@ type SignedCookieData struct {
 }
 
 type CookieSigner struct {
-	secretKey []byte
+	secretKey    []byte
+	isProduction bool
 }
 
-func NewCookieSigner(secretKey string) *CookieSigner {
+func NewCookieSigner(secretKey string, isProduction bool) *CookieSigner {
 	return &CookieSigner{
-		secretKey: []byte(secretKey),
+		secretKey:    []byte(secretKey),
+		isProduction: isProduction,
 	}
 }
 
@@ -89,7 +91,7 @@ func (cs *CookieSigner) Verify(signedData string) (*SignedCookieData, error) {
 }
 
 // SetAuthCookie configura la cookie de autenticación en la respuesta HTTP
-func SetAuthCookie(w http.ResponseWriter, cookieValue string, expiresAt time.Time) {
+func (cs *CookieSigner) SetAuthCookie(w http.ResponseWriter, cookieValue string, expiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tk",
 		Value:    cookieValue,
@@ -97,21 +99,21 @@ func SetAuthCookie(w http.ResponseWriter, cookieValue string, expiresAt time.Tim
 		Expires:  expiresAt,
 		MaxAge:   int(time.Until(expiresAt).Seconds()),
 		HttpOnly: true,
-		Secure:   true, // Solo HTTPS en producción
+		Secure:   cs.isProduction,
 		SameSite: http.SameSiteStrictMode,
 	})
 	fmt.Printf("✅ COOKIE SET SUCCESSFULLY\n")
 }
 
 // ClearAuthCookie elimina la cookie de autenticación
-func ClearAuthCookie(w http.ResponseWriter) {
+func (cs *CookieSigner) ClearAuthCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "tk",
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   cs.isProduction,
 		SameSite: http.SameSiteStrictMode,
 	})
 }

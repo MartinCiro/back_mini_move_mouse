@@ -46,7 +46,3 @@ func (s *UsuarioService) ObtenerUsuarioConRelaciones(ctx context.Context, usuari
 func (s *UsuarioService) ObtenerUsuarioPorUsername(ctx context.Context, username string) (*Usuario, error) {
 	return s.usuarioPort.ObtenerUsuarioPorUsername(ctx, username)
 }
-
-func (s *UsuarioService) ObtenerUsuarioPorEmail(ctx context.Context, email string) (*Usuario, error) {
-	return s.usuarioPort.ObtenerUsuarioPorEmail(ctx, email)
-}

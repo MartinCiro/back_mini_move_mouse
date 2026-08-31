@@ -1,9 +1,9 @@
-// internal/app/app.go
 package app
 
 import (
 	"api_go/config"
 	"api_go/internal/core/auth"
+	"api_go/internal/core/dwd"
 	"api_go/internal/core/estados"
 	"api_go/internal/core/login"
 	"api_go/internal/core/permisos"
@@ -14,13 +14,10 @@ import (
 	"api_go/internal/infrastructure/database"
 	"api_go/internal/infrastructure/database/models"
 	"api_go/internal/infrastructure/jwt"
-	"api_go/internal/infrastructure/redis"
 	"api_go/internal/infrastructure/repositories"
 	"api_go/pkg/logger"
 	"api_go/pkg/utils"
-	"context"
 	"fmt"
-	"strconv"
 
 	"gorm.io/gorm"
 )
@@ -31,7 +28,6 @@ type App struct {
 
 	// Infraestructura
 	DB           *gorm.DB
-	RedisCache   *redis.Cache
 	JWTService   *jwt.JWTService
 	CookieSigner *cookies.CookieSigner
 
@@ -42,10 +38,12 @@ type App struct {
 	RolService     *roles.RolService
 	UsuarioService *usuarios.UsuarioService
 
+	// Servicios de Descargas
+	DescargaService *dwd.DescargaService
+
 	// Servicios de Utilidad
 	PasswordService *utils.PasswordService
-
-	LoginService *login.LoginService
+	LoginService    *login.LoginService
 }
 
 func NewApp() *App {
@@ -68,26 +66,21 @@ func (a *App) Initialize(cfg *config.Config) error {
 	// Ejecutar migraciones si es necesario
 	if err := a.runMigrations(); err != nil {
 		logger.Error("❌ Error en migraciones", "error", err)
-		// En producción podrías continuar, en desarrollo fallar
 		if cfg.IsDevelopment() {
 			return fmt.Errorf("error en migraciones: %v", err)
 		}
 	}
 
-	/* log.Println("✅ Todos los servicios inicializados correctamente") */
 	return nil
 }
 
 func (a *App) initializeInfrastructure() error {
-	// Inicializar base de datos
+	// Inicializar base de datos (SQLite)
 	db, err := a.initializeDatabase()
 	if err != nil {
 		return fmt.Errorf("error inicializando base de datos: %v", err)
 	}
 	a.DB = db
-
-	// Inicializar Redis
-	a.RedisCache = a.initializeRedis()
 
 	// Inicializar JWT Service
 	a.JWTService = a.initializeJWTService()
@@ -99,39 +92,20 @@ func (a *App) initializeInfrastructure() error {
 }
 
 func (a *App) initializeDatabase() (*gorm.DB, error) {
-	// Convertir PortDB a entero
-	port, err := strconv.Atoi(a.Config.PortDB)
-	if err != nil {
-		port = 5432 // Valor por defecto
-		logger.Warn("usando puerto por defecto para BD", "port", port)
-	}
-
 	dbConfig := database.DBConfig{
-		ServerDB:   a.Config.ServerDB,
-		PortDB:     port,
-		UserDB:     a.Config.UserDB,
-		PasswordDB: a.Config.PasswordDB,
-		Database:   a.Config.Database,
-		SSLMode:    "disable",
+		DBPath: a.Config.DBPath,
 	}
 
 	db, err := database.GetConnection(dbConfig)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error inicializando base de datos: %v", err)
 	}
 
-	// Verificar conexión
 	if err := database.HealthCheck(db); err != nil {
 		return nil, fmt.Errorf("error en health check de BD: %v", err)
 	}
 
 	return db, nil
-}
-
-func (a *App) initializeRedis() *redis.Cache {
-	cache := redis.InitializeCache(a.Config)
-	logger.Info("redis configurado", "url", a.Config.RedisURL, "ttl", a.Config.RedisTTL)
-	return cache
 }
 
 func (a *App) initializeJWTService() *jwt.JWTService {
@@ -147,41 +121,37 @@ func (a *App) initializeJWTService() *jwt.JWTService {
 }
 
 func (a *App) initializeCookieSigner() *cookies.CookieSigner {
-	if a.Config.CookieSecret == "" {
-		logger.Warn("CookieSecret está vacío en la configuración, usando valor por defecto")
-	} else {
-		logger.Info("CookieSecret cargado correctamente", "length", len(a.Config.CookieSecret))
-	}
-	return cookies.NewCookieSigner(a.Config.CookieSecret)
+	return cookies.NewCookieSigner(a.Config.CookieSecret, a.Config.IsProduction())
 }
 
 func (a *App) initializeServices() error {
 	// Inicializar servicios de utilidad
 	a.PasswordService = utils.NewPasswordService(a.Config.JWTSalt)
 
-	// Inicializar DB Manager corregido
+	// Inicializar DB Manager
 	dbManager := database.NewDBManager(a.DB)
 
-	// Inicializar repositorios separados
+	// Inicializar repositorios
 	usuarioRepo := repositories.NewUsuarioRepository(dbManager)
 	rolRepo := repositories.NewRolRepository(dbManager)
 	permisoRepo := repositories.NewPermisoRepository(dbManager)
 	estadoRepo := repositories.NewEstadoRepository(dbManager)
 
-	// ✅ INICIALIZAR ESTADOS ADAPTER Y SERVICE
-	estadosAdapter := adapters.NewEstadosAdapter(a.DB, a.RedisCache)
+	// ✅ INICIALIZAR ADAPTERS
+	estadosAdapter := adapters.NewEstadosAdapter(a.DB)
 	a.EstadoService = estados.NewEstadoService(estadosAdapter)
 
-	// ✅ INICIALIZAR PERMISOS ADAPTER Y SERVICE
-	permisosAdapter := adapters.NewPermisosAdapter(a.DB, a.RedisCache)
+	permisosAdapter := adapters.NewPermisosAdapter(a.DB)
 	a.PermisoService = permisos.NewPermisoService(permisosAdapter)
 
-	// ✅ INICIALIZAR ROLES ADAPTER Y SERVICE
-	rolesAdapter := adapters.NewRolesAdapter(a.DB, a.RedisCache)
+	rolesAdapter := adapters.NewRolesAdapter(a.DB)
 	a.RolService = roles.NewRolService(rolesAdapter)
 
-	usuariosAdapter := adapters.NewUsuariosAdapter(a.DB, a.RedisCache)
+	usuariosAdapter := adapters.NewUsuariosAdapter(a.DB)
 	a.UsuarioService = usuarios.NewUsuarioService(usuariosAdapter)
+
+	descargasAdapter := adapters.NewDescargasAdapter("dist")
+	a.DescargaService = dwd.NewDescargaService(descargasAdapter)
 
 	// AuthAdapter coordina los repositorios
 	authAdapter := repositories.NewAuthAdapter(usuarioRepo, rolRepo, permisoRepo)
@@ -189,7 +159,6 @@ func (a *App) initializeServices() error {
 	// Inicializar servicios del core
 	a.AuthService = auth.NewAuthService(
 		authAdapter,
-		a.RedisCache,
 		a.CookieSigner,
 		a.PasswordService,
 		usuarioRepo,
@@ -201,7 +170,6 @@ func (a *App) initializeServices() error {
 	a.LoginService = login.NewLoginService(
 		authAdapter,
 		a.JWTService,
-		a.RedisCache,
 		a.PasswordService,
 		a.Config,
 	)
@@ -233,29 +201,18 @@ func (a *App) runMigrations() error {
 			logger.Error("Error migrando modelo", "model", fmt.Sprintf("%T", model), "error", err)
 			return err
 		}
-		//logger.Info("✅ Modelo migrado", "model", fmt.Sprintf("%T", model))
 	}
 
-	//logger.Info("✅ Todas las migraciones completadas")
 	return nil
 }
 
 func (a *App) Shutdown() {
-	//logger.Info("cerrando servicios de la aplicación")
-
 	// Cerrar base de datos
 	if a.DB != nil {
 		if sqlDB, err := a.DB.DB(); err == nil {
 			if err := sqlDB.Close(); err != nil {
 				logger.Warn("error cerrando conexión de BD", "error", err)
 			}
-		}
-	}
-
-	// Cerrar Redis
-	if a.RedisCache != nil {
-		if err := a.RedisCache.Close(); err != nil {
-			logger.Warn("error cerrando conexión de Redis", "error", err)
 		}
 	}
 
@@ -269,11 +226,6 @@ func (a *App) HealthCheck() error {
 		return fmt.Errorf("base de datos no saludable: %v", err)
 	}
 
-	// Verificar Redis
-	if err := a.RedisCache.HealthCheck(context.Background()); err != nil {
-		return fmt.Errorf("redis no saludable: %v", err)
-	}
-
 	return nil
 }
 
@@ -285,9 +237,4 @@ func (a *App) GetConfig() *config.Config {
 // GetDB retorna la instancia de BD (útil para tests y operaciones directas)
 func (a *App) GetDB() *gorm.DB {
 	return a.DB
-}
-
-// GetRedis retorna el cliente de Redis (útil para operaciones avanzadas)
-func (a *App) GetRedis() *redis.Cache {
-	return a.RedisCache
 }

@@ -10,6 +10,7 @@ import (
 	"api_go/internal/interfaces/api/common"
 	"api_go/internal/interfaces/api/handlers/auth"
 	common_handler "api_go/internal/interfaces/api/handlers/common"
+	"api_go/internal/interfaces/api/handlers/dwd"
 	"api_go/internal/interfaces/api/handlers/estados"
 	"api_go/internal/interfaces/api/handlers/permisos"
 	"api_go/internal/interfaces/api/handlers/roles"
@@ -32,11 +33,6 @@ func (rw *responseWriter) WriteHeader(code int) {
 func SetupRouter(app *app.App, cfg *config.Config) http.Handler {
 	mux := http.NewServeMux()
 
-	// Servir archivos estáticos
-	/* if cfg.IsDevelopment() {
-		setupStaticFiles(mux)
-	} */
-
 	// Configurar todas las rutas
 	setupAllRoutes(mux, app)
 
@@ -44,33 +40,18 @@ func SetupRouter(app *app.App, cfg *config.Config) http.Handler {
 	return withGlobalMiddleware(mux, cfg)
 }
 
-// setupStaticFiles configura archivos estáticos
-/* func setupStaticFiles(mux *http.ServeMux) {
-	publicDir := "./public"
-
-	if _, err := os.Stat(publicDir); err == nil {
-		fs := http.FileServer(http.Dir(publicDir))
-		mux.Handle("/api-docs/", http.StripPrefix("/api-docs", fs))
-		log.Println("📚 Serviendo documentación en /api-docs")
-	}
-} */
-
 // setupAllRoutes configura todas las rutas (públicas y protegidas)
 func setupAllRoutes(mux *http.ServeMux, app *app.App) {
 
 	// ========== RUTAS ACME para Let's Encrypt ==========
-	// Este handler debe responder ANTES que cualquier otra ruta
 	mux.HandleFunc("GET /.well-known/acme-challenge/", func(w http.ResponseWriter, r *http.Request) {
-		// Let's Encrypt validation endpoint
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(""))
 		log.Printf("ACME challenge request: %s", r.URL.Path)
 	})
 
-	
 	// Inicializar middlewares
 	authMiddleware := middlewares.NewAuthMiddleware(app.JWTService)
-	refreshMiddleware := middlewares.NewRefreshMiddleware(app.AuthService)
 
 	// Configurar CookieSigner si está disponible
 	if app.CookieSigner != nil {
@@ -80,23 +61,22 @@ func setupAllRoutes(mux *http.ServeMux, app *app.App) {
 	// Configurar auth service en el middleware
 	authMiddleware.SetAuthService(app.AuthService)
 
-	// Inicializar permisos middleware
-	permsMiddleware := middlewares.NewPermissionsMiddleware(app.RedisCache)
-
 	// Inicializar handlers
 	estadosHandler := estados.NewEstadosHandler(app.EstadoService)
 	permisosHandler := permisos.NewPermisosHandler(app.PermisoService)
-	authHandler := auth.NewAuthHandler(app.AuthService)
+	authHandler := auth.NewAuthHandler(app.AuthService, app.CookieSigner)
 	profileHandler := auth.NewProfileHandler(app.AuthService)
 	rolesHandler := roles.NewRolesHandler(app.RolService)
 	usuariosHandler := usuarios.NewUsuariosHandler(app.UsuarioService)
+	descargasHandler := dwd.NewDescargasHandler(app.DescargaService)
 
 	// ========== RUTAS PÚBLICAS ==========
 
 	// Health checks
 	mux.HandleFunc("GET /{$}", common_handler.HealthHandler)
 	mux.HandleFunc("GET /health", common_handler.HealthHandler)
-	mux.HandleFunc("GET /ready", common_handler.ReadyHandler(app.DB, app.RedisCache))
+	// ✅ CORREGIDO: Sin dependencia de Redis en ReadyHandler
+	mux.HandleFunc("GET /ready", common_handler.ReadyHandler(app.DB))
 
 	// Autenticación (públicas)
 	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
@@ -107,168 +87,128 @@ func setupAllRoutes(mux *http.ServeMux, app *app.App) {
 	// Crear un subrouter para rutas protegidas
 	protected := http.NewServeMux()
 
-	// ✅ RUTAS DE USUARIOS (con refresh middleware)
+	// ✅ RUTAS DE USUARIOS (RefreshMiddleware eliminado)
 	protected.Handle("GET /api/usuarios",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionUsuariosListar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(usuariosHandler.ObtenerUsuarios),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionUsuariosListar)(
+			http.HandlerFunc(usuariosHandler.ObtenerUsuarios),
 		))
 
 	protected.Handle("GET /api/usuarios/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionUsuariosListarXid)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(usuariosHandler.ObtenerUsuarioXid),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionUsuariosListarXid)(
+			http.HandlerFunc(usuariosHandler.ObtenerUsuarioXid),
 		))
 
 	protected.Handle("POST /api/usuarios",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionUsuariosCrear)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(authHandler.Register),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionUsuariosCrear)(
+			http.HandlerFunc(authHandler.Register),
 		))
 
 	protected.Handle("PATCH /api/usuarios/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionUsuariosEditar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(usuariosHandler.ActualizarUsuario),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionUsuariosEditar)(
+			http.HandlerFunc(usuariosHandler.ActualizarUsuario),
 		))
 
-	// ✅ RUTAS DE ESTADOS (con refresh middleware)
+	// ✅ RUTAS DE ESTADOS
 	protected.Handle("GET /api/estados",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionEstadosListar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(estadosHandler.ObtenerEstados),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionEstadosListar)(
+			http.HandlerFunc(estadosHandler.ObtenerEstados),
 		))
 
 	protected.Handle("GET /api/estados/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionEstadosVer)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(estadosHandler.ObtenerEstadoXid),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionEstadosVer)(
+			http.HandlerFunc(estadosHandler.ObtenerEstadoXid),
 		))
 
 	protected.Handle("POST /api/estados",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionEstadosCrear)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(estadosHandler.CrearEstado),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionEstadosCrear)(
+			http.HandlerFunc(estadosHandler.CrearEstado),
 		))
 
 	protected.Handle("PATCH /api/estados/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionEstadosEditar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(estadosHandler.ActualizarEstado),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionEstadosEditar)(
+			http.HandlerFunc(estadosHandler.ActualizarEstado),
 		))
 
 	protected.Handle("DELETE /api/estados/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionEstadosEliminar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(estadosHandler.EliminarEstado),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionEstadosEliminar)(
+			http.HandlerFunc(estadosHandler.EliminarEstado),
 		))
 
-	// ✅ RUTAS DE PERMISOS (con refresh middleware)
+	// ✅ RUTAS DE PERMISOS
 	protected.Handle("GET /api/permisos",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionPermisosListar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(permisosHandler.ObtenerPermisos),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionPermisosListar)(
+			http.HandlerFunc(permisosHandler.ObtenerPermisos),
 		))
 
 	protected.Handle("GET /api/permisos/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionPermisosVer)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(permisosHandler.ObtenerPermisoXid),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionPermisosVer)(
+			http.HandlerFunc(permisosHandler.ObtenerPermisoXid),
 		))
 
 	protected.Handle("POST /api/permisos",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionPermisosCrear)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(permisosHandler.CrearPermiso),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionPermisosCrear)(
+			http.HandlerFunc(permisosHandler.CrearPermiso),
 		))
 
 	protected.Handle("PATCH /api/permisos/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionPermisosEditar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(permisosHandler.ActualizarPermiso),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionPermisosEditar)(
+			http.HandlerFunc(permisosHandler.ActualizarPermiso),
 		))
 
 	protected.Handle("DELETE /api/permisos/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionPermisosEliminar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(permisosHandler.EliminarPermiso),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionPermisosEliminar)(
+			http.HandlerFunc(permisosHandler.EliminarPermiso),
 		))
 
-	// ✅ RUTAS DE ROLES (con refresh middleware)
+	// ✅ RUTAS DE ROLES
 	protected.Handle("GET /api/roles",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesListar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.ObtenerRoles),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesListar)(
+			http.HandlerFunc(rolesHandler.ObtenerRoles),
 		))
 
 	protected.Handle("GET /api/roles/permisos",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesPermisos)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.ObtenerPermisos),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesPermisos)(
+			http.HandlerFunc(rolesHandler.ObtenerPermisos),
 		))
 
 	protected.Handle("GET /api/roles/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesVer)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.ObtenerRolXid),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesVer)(
+			http.HandlerFunc(rolesHandler.ObtenerRolXid),
 		))
 
 	protected.Handle("POST /api/roles",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesCrear)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.CrearRol),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesCrear)(
+			http.HandlerFunc(rolesHandler.CrearRol),
 		))
 
 	protected.Handle("PATCH /api/roles/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesEditar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.ActualizarRol),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesEditar)(
+			http.HandlerFunc(rolesHandler.ActualizarRol),
 		))
 
 	protected.Handle("DELETE /api/roles/{id}",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionRolesEliminar)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(rolesHandler.EliminarRol),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionRolesEliminar)(
+			http.HandlerFunc(rolesHandler.EliminarRol),
 		))
 
-	// ✅ RUTAS DE AUTH PROTEGIDAS (con refresh middleware)
+	// ✅ RUTAS DE AUTH PROTEGIDAS
 	protected.Handle("POST /api/auth/logout",
-		authMiddleware.RequireAuthAndPermission(permsMiddleware, middlewares.PermissionLoginLogout)(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(authHandler.Logout),
-			),
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionLoginLogout)(
+			http.HandlerFunc(authHandler.Logout),
 		))
 
 	protected.Handle("GET /api/profile",
 		authMiddleware.Handler(
-			refreshMiddleware.Handler(
-				http.HandlerFunc(profileHandler.GetProfile),
-			),
+			http.HandlerFunc(profileHandler.GetProfile),
 		))
 
-	// ✅ APLICAR MIDDLEWARE DE AUTENTICACIÓN AL ROUTER PROTEGIDO
-	// El orden es importante: Auth primero, luego Refresh
-	mux.Handle("/", authMiddleware.Handler(protected))
+	protected.Handle("POST /api/descargas/archivo",
+		authMiddleware.RequireAuthAndPermission(middlewares.PermissionDescargasEjecutar)(
+			http.HandlerFunc(descargasHandler.DescargarArchivo),
+		))
+
+	// ✅ APLICAR RUTAS PROTEGIDAS (ya tienen auth middleware individualmente, no se necesita envolver todo el mux)
+	mux.Handle("/", protected)
 }
 
 // withGlobalMiddleware aplica middlewares globales

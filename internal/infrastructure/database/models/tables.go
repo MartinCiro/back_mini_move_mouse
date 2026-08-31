@@ -1,4 +1,3 @@
-// internal/infrastructure/database/models/tables.go
 package models
 
 import (
@@ -13,7 +12,7 @@ type Migration struct {
 	MigrationName     string     `gorm:"size:255;not null" json:"migration_name"`
 	Logs              *string    `gorm:"type:text" json:"logs"`
 	RolledBackAt      *time.Time `json:"rolled_back_at"`
-	StartedAt         time.Time  `gorm:"not null;default:now()" json:"started_at"`
+	StartedAt         time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"started_at"`
 	AppliedStepsCount int        `gorm:"not null;default:0" json:"applied_steps_count"`
 }
 
@@ -57,18 +56,12 @@ type RolXPermiso struct {
 
 // Usuario model
 type Usuario struct {
-	Documento       string     `gorm:"primaryKey" json:"documento"`
-	Nombres         string     `gorm:"type:text;not null" json:"nombres"`
-	Apellido        string     `gorm:"type:text;not null" json:"apellido"`
-	Email           string     `gorm:"type:text;not null;uniqueIndex" json:"email"`
-	InfoPerfil      *string    `gorm:"type:text" json:"info_perfil,omitempty"`
-	NumContacto     *string    `gorm:"type:text" json:"num_contacto,omitempty"`
-	NomUser         string     `gorm:"type:text;not null" json:"nom_user"`
-	Pass            string     `gorm:"type:text;not null" json:"pass"`
-	IDRol           int        `gorm:"not null" json:"id_rol"`
-	EstadoID        int        `gorm:"not null" json:"estado_id"`
-	FechaNacimiento *time.Time `gorm:"type:date" json:"fecha_nacimiento,omitempty"`
-	FechaRegistro   time.Time  `gorm:"type:timestamp;default:now()" json:"fecha_registro"`
-	Rol             Rol        `gorm:"foreignKey:IDRol;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"rol"`
-	Estado          Estado     `gorm:"foreignKey:EstadoID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"estado"`
+	Documento     string    `gorm:"primaryKey" json:"documento"`
+	NomUser       string    `gorm:"type:text;not null" json:"nom_user"`
+	Pass          string    `gorm:"type:text;not null" json:"pass"`
+	IDRol         int       `gorm:"not null" json:"id_rol"`
+	EstadoID      int       `gorm:"not null" json:"estado_id"`
+	FechaRegistro time.Time `gorm:"type:timestamp;default:CURRENT_TIMESTAMP" json:"fecha_registro"`
+	Rol           Rol       `gorm:"foreignKey:IDRol;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"rol"`
+	Estado        Estado    `gorm:"foreignKey:EstadoID;constraint:OnUpdate:CASCADE,OnDelete:RESTRICT;" json:"estado"`
 }

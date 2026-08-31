@@ -12,22 +12,21 @@ import (
 type ExpiresAt = time.Time
 
 type Usuario struct {
-	ID                *int   `json:"id,omitempty"`
+	Documento         string `json:"documento"`
 	Username          string `json:"username,omitempty"`
-	Email             string `json:"email"`
 	IDRol             *int   `json:"id_rol,omitempty"`
 	IDEstado          *int   `json:"id_estado,omitempty"`
 	encryptedPassword string
 }
 
 // NewUsuario crea un nuevo usuario con password encriptado
-func NewUsuario(username, password string, idRol, idEstado *int) (*Usuario, error) {
+func NewUsuario(documento, username, password string, idRol, idEstado *int) (*Usuario, error) {
 	encryptedPassword, err := encodePassword(password)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Usuario{
+		Documento:         documento,
 		Username:          username,
 		IDRol:             idRol,
 		IDEstado:          idEstado,
@@ -36,8 +35,9 @@ func NewUsuario(username, password string, idRol, idEstado *int) (*Usuario, erro
 }
 
 // NewUsuarioFromEncrypted crea un usuario con password ya encriptado
-func NewUsuarioFromEncrypted(username, encryptedPassword string, idRol, idEstado *int) *Usuario {
+func NewUsuarioFromEncrypted(documento, username, encryptedPassword string, idRol, idEstado *int) *Usuario {
 	return &Usuario{
+		Documento:         documento,
 		Username:          username,
 		IDRol:             idRol,
 		IDEstado:          idEstado,
