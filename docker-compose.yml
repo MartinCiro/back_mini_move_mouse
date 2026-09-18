@@ -1,13 +1,13 @@
 services:
   app_backend:
     build: .
-    container_name: go_backend
+    container_name: go_backend_mouse
     restart: always
     ports:
-      - "8080:8080" # Asegúrate de que coincida con PORT en tu .env (o cámbialo a "3000:3000")
+      - "54300:${PORT:-3000}" # Asegúrate de que coincida con PORT en tu .env (o cámbialo a "3000:3000")
     environment:
       - ENV=${ENV:-development}
-      - PORT=8080
+      - PORT=${PORT:-3000}
       # Base de datos SQLite (Ruta interna del contenedor para persistencia)
       - DB_PATH=/app/data/app.db
       # Autenticación
